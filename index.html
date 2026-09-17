@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>e-Paper Nachricht senden</title>
+<style>
+  :root{
+    --bg:#f4f2ec; --card:#fff; --ink:#17170f; --mid:#726f63; --faint:#b3b0a4;
+    --line:#e7e4da; --good:#2f6b46; --bad:#a23a2e; --field:#faf9f5;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    -webkit-text-size-adjust:100%;
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  .wrap{max-width:440px; margin:0 auto; padding:22px 18px 48px}
+  header h1{font-size:20px; margin:0 0 3px}
+  header p{margin:0; font-size:12.5px; color:var(--mid)}
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:16px;
+    padding:16px; margin-top:16px;
+  }
+  label{display:block; font-size:12px; text-transform:uppercase; letter-spacing:1px;
+    color:var(--mid); margin:0 0 7px}
+  .card + .card{margin-top:14px}
+  input, textarea{
+    width:100%; padding:12px 13px; border:1px solid var(--line); border-radius:10px;
+    font-size:16px; background:var(--field); color:var(--ink);
+    font-family:inherit; -webkit-appearance:none;
+  }
+  input:focus, textarea:focus{outline:none; border-color:var(--faint)}
+  textarea{resize:vertical; min-height:112px; line-height:1.45}
+  .sub{font-size:11.5px; color:var(--mid); margin-top:7px; line-height:1.55}
+  .row{display:flex; align-items:baseline; justify-content:space-between; gap:10px}
+  .saved{font-size:11px; color:var(--good); opacity:0; transition:opacity .25s}
+  .saved.on{opacity:1}
+  button{
+    width:100%; margin-top:16px; padding:14px; border:none; border-radius:11px;
+    background:var(--ink); color:#fff; font-size:15px; font-weight:600;
+    font-family:inherit; cursor:pointer; transition:opacity .15s;
+  }
+  button:active{opacity:.75}
+  button:disabled{opacity:.45; cursor:default}
+  .msg{margin-top:13px; font-size:13px; min-height:18px; text-align:center}
+  .msg.ok{color:var(--good)} .msg.err{color:var(--bad)}
+  .foot{margin-top:22px; font-size:11.5px; color:var(--mid); line-height:1.6; text-align:center}
+  code{background:#ece9e0; padding:1px 5px; border-radius:5px; font-size:11px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>e-Paper Nachricht</h1>
+    <p>Schickt eine Nachricht ans Board (ueber ntfy.sh)</p>
+  </header>
+
+  <div class="card">
+    <div class="row">
+      <label for="topic">ntfy-Thema</label>
+      <span class="saved" id="saved">gemerkt &#10003;</span>
+    </div>
+    <input id="topic" type="text" inputmode="text" autocapitalize="off"
+           autocomplete="off" spellcheck="false" placeholder="z.B. flo-epaper-4711">
+    <div class="sub">Muss mit dem Thema im Board-Setup uebereinstimmen. Wird auf
+      diesem Geraet gespeichert.</div>
+  </div>
+
+  <div class="card">
+    <label for="title">Titel (optional)</label>
+    <input id="title" type="text" placeholder="z.B. Erinnerung">
+    <label for="message" style="margin-top:14px">Nachricht</label>
+    <textarea id="message" placeholder="Text eingeben&hellip;"></textarea>
+    <button id="send">Senden</button>
+    <div class="msg" id="status"></div>
+  </div>
+
+  <div class="foot">
+    Umlaute/Emoji zeigt das Board nicht an (nur ASCII-Schrift) &mdash; der Titel
+    wird darum automatisch vereinfacht.<br>
+    Alternative: <code>curl -d "Hallo" ntfy.sh/DEIN-THEMA</code>
+  </div>
+</div>
+
+<script>
+(function(){
+  var KEY = 'epaper_topic';
+  var topicEl  = document.getElementById('topic');
+  var titleEl  = document.getElementById('title');
+  var msgEl    = document.getElementById('message');
+  var btn      = document.getElementById('send');
+  var statusEl = document.getElementById('status');
+  var savedEl  = document.getElementById('saved');
+  var savedTimer;
+
+  // Gemerktes Thema laden
+  try { topicEl.value = localStorage.getItem(KEY) || ''; } catch(e){}
+
+  // Thema bei Aenderung merken
+  topicEl.addEventListener('input', function(){
+    try { localStorage.setItem(KEY, topicEl.value.trim()); } catch(e){}
+    savedEl.classList.add('on');
+    clearTimeout(savedTimer);
+    savedTimer = setTimeout(function(){ savedEl.classList.remove('on'); }, 1200);
+  });
+
+  // Titel auf ASCII reduzieren (ntfy uebertraegt ihn im HTTP-Header)
+  function asciiTitle(s){
+    var map = {'ä':'ae','ö':'oe','ü':'ue','Ä':'Ae',
+               'Ö':'Oe','Ü':'Ue','ß':'ss'};
+    return s.replace(/[äöüÄÖÜß]/g,
+             function(c){ return map[c]; })
+            .replace(/[^\x20-\x7e]/g, '').trim();
+  }
+
+  function setStatus(text, kind){
+    statusEl.textContent = text;
+    statusEl.className = 'msg' + (kind ? ' ' + kind : '');
+  }
+
+  function send(){
+    var topic = topicEl.value.trim();
+    var text  = msgEl.value;
+    if (!topic){ setStatus('Bitte zuerst ein Thema eintragen.', 'err'); topicEl.focus(); return; }
+    if (!text.trim()){ setStatus('Die Nachricht ist leer.', 'err'); msgEl.focus(); return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Senden…';
+    setStatus('');
+
+    var headers = {};
+    var t = asciiTitle(titleEl.value || '');
+    if (t) headers['Title'] = t;
+
+    fetch('https://ntfy.sh/' + encodeURIComponent(topic), {
+      method: 'POST',
+      headers: headers,
+      body: text
+    })
+    .then(function(r){
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      setStatus('Gesendet ✓  Das Board zeigt die Nachricht gleich an.', 'ok');
+      msgEl.value = '';
+    })
+    .catch(function(err){
+      setStatus('Senden fehlgeschlagen: ' + err.message, 'err');
+    })
+    .finally(function(){
+      btn.disabled = false;
+      btn.textContent = 'Senden';
+    });
+  }
+
+  btn.addEventListener('click', send);
+  // Cmd/Ctrl+Enter im Textfeld sendet
+  msgEl.addEventListener('keydown', function(e){
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') send();
+  });
+})();
+</script>
+</body>
+</html>
